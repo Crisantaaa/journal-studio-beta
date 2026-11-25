@@ -1,0 +1,44 @@
+import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+import vm from "node:vm";
+
+const html=readFileSync(new URL("../worker/index.html",import.meta.url),"utf8");
+const model=html.match(/function newId\(\)\{[\s\S]*?function activeProject\(\)\{[^}]+\}/)?.[0];
+assert.ok(model,"project and page state model missing");
+const context=vm.createContext({PAGE_H:1123,migrate:()=>{},library:{projects:[],activeProjectId:""}});
+vm.runInContext(model,context);
+const project=vm.runInContext('newProject("甲项目")',context);
+assert.equal(project.pages.length,1);
+assert.equal(project.pages[0].aiChats.length,1);
+assert.equal(project.pages[0].selectedAssetIds.length,0);
+const second=vm.runInContext('newPage("第 2 页")',context);
+project.pages.push(second);
+assert.notEqual(project.pages[0].activeChatId,second.activeChatId);
+project.pages[0].aiChats[0].messages.push({role:"user",content:"独角兽"});
+assert.equal(second.aiChats[0].messages.length,0);
+
+const legacy={projects:[{id:"old",name:"旧项目",cur:1,pages:[{id:1,name:"第 1 页",elements:[],strokes:[]},{id:2,name:"第 2 页",elements:[],strokes:[]}],aiChats:[{id:"legacy-chat",name:"旧对话",messages:[{role:"user",content:"原有内容"}]}],activeChatId:"legacy-chat"}],activeProjectId:"old"};
+const migrated=vm.runInContext(`normalizeLibrary(${JSON.stringify(legacy)})`,context);
+assert.equal(migrated.projects[0].pages[1].aiChats[0].messages[0].content,"原有内容");
+assert.equal(migrated.projects[0].pages[0].aiChats[0].messages.length,0);
+const serializer=html.match(/function serializeLibrary\(\)\{[\s\S]*?\n\}/)?.[0];
+assert.ok(serializer,"save compatibility serializer missing");
+vm.runInContext(serializer,context);
+context.library={projects:[project],activeProjectId:project.id};
+const saved=JSON.parse(vm.runInContext('serializeLibrary()',context));
+assert.equal(saved.projects[0].aiChats[0].id,project.pages[0].activeChatId);
+assert.equal(saved.projects[0].pages[1].aiChats[0].messages.length,0);
+
+const apply=html.match(/async function applyBg\(spec,source="AI 设计",targetPageId=page\(\)\.id,allowReviewFailed=false\)\{[\s\S]*?\n\}/)?.[0];
+assert.ok(apply,"target-page apply function missing");
+const pages=[{id:1,name:"第 1 页",height:1123,bg:null,elements:[],designLayerIds:[],aiChats:[{id:"source",messages:[]}],selectedAssetIds:[]},{id:2,name:"第 2 页",height:2246,bg:null,elements:[],designLayerIds:[],aiChats:[{id:"target",messages:[]}],selectedAssetIds:[]}];
+const scene=vm.createContext({state:{pages,cur:0},page:()=>pages[scene.state.cur],pageHeight:p=>p.height,uid:()=>"new-layer",describeBgChanges:()=>"测试背景",renderPage:()=>{},renderChat:()=>{},fitScale:()=>{},persist:()=>{},toast:()=>{},SERVER:false,aiPending:false,aiPreview:null,previewComparing:false,selectedId:null});
+vm.runInContext(apply,scene);
+vm.runInContext('applyBg({background:{type:"solid",color:"#ffffff"},layers:[{type:"image",assetId:"asset-2",x:20,y:100,w:200,h:200}]},"AI 设计",2)',scene);
+assert.equal(pages[0].elements.length,0,"source page must remain untouched");
+assert.equal(pages[1].elements.length,1);
+assert.equal(pages[1].elements[0].y,200,"layers should scale to target page height");
+assert.equal(pages[1].selectedAssetIds[0],"asset-2");
+assert.equal(scene.state.cur,1);
+assert.equal(pages[0].aiChats[0].id,"source","source chat must stay on source page");
+console.log("page chat, assets, and target apply checks passed");
