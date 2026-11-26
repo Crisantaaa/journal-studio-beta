@@ -38,6 +38,13 @@ const fallback=vm.runInContext(`fallbackDesignDecision("为我的石塑粘土手
 assert.equal(fallback.visuals.length,0);
 const anchored=vm.runInContext(`anchorDesignGroups(fallbackDesignDecision("美食日常",[]),"画面主体或装饰：温馨灯泡，红色格子餐布，高脚杯")`,context);
 assert.deepEqual(Array.from(anchored.groups.map(group=>group.subject)),["温馨灯泡","红色格子餐布","高脚杯"]);
+const guided="请为当前页设计背景。\n我的描述：做一页红金色植物手帐背景\n呈现方式：清爽线条\n装饰组数：适中（3–5 组）";
+const hallucinated={groups:[{id:"g1",subject:"绿色植物枝叶"},{id:"g2",subject:"米色蘑菇相框"}],mustHave:["绿色植物枝叶","米色蘑菇相框"]};
+const grounded=context.filterUnrequestedDesignGroups(hallucinated,guided);
+assert.deepEqual(Array.from(grounded.groups,group=>group.subject),["绿色植物枝叶"],"model invented collage must not enter material generation");
+assert.deepEqual(Array.from(grounded.mustHave),["绿色植物枝叶"]);
+const dreamGrounded=context.filterUnrequestedDesignGroups({groups:[{id:"g1",subject:"独角兽"},{id:"g2",subject:"梦境环境"},{id:"g3",subject:"轻盈点缀"}]},"为我的绘画日常生成梦幻独角兽背景，梦核感，motif 丰富一点");
+assert.deepEqual(Array.from(dreamGrounded.groups,group=>group.subject),["独角兽"],"dream atmosphere must not become separate scene tiles");
 const capped=vm.runInContext(`parseDesignDecision(${JSON.stringify(JSON.stringify({intent:"群像",composition:"右侧主视觉",visuals:["a","b","c","d"].map(assetId=>({assetId,renderMode:"illustration"})),groups:[{id:"g1",subject:"主体"},{id:"g2",subject:"环境"}]}))},new Set(["a","b","c","d"]))`,context);
 assert.equal(capped.visuals.length,3);
 const fitnessRequest="给我的健身日常手账生成背景，蓬勃生命力，参考钢铁侠风格，不拘一格";

@@ -4,6 +4,6 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build-worker.mjs",
-    "test:ai": "node scripts/test-ai-integrity-fixes.mjs && node scripts/test-kolors-design.mjs && node scripts/test-design-plan.mjs && node scripts/test-page-isolation.mjs && node scripts/test-ai-scene.mjs && node scripts/test-design-scene-v2.mjs && node scripts/test-render-replies.mjs && node scripts/test-design-screen-batches.mjs && node scripts/test-ai-stream.mjs"
+    "test:ai": "node scripts/test-conversation-draft.mjs && node scripts/test-background-generator.mjs && node scripts/test-controlled-design-routing.mjs && node scripts/test-ai-integrity-fixes.mjs && node scripts/test-kolors-design.mjs && node scripts/test-design-plan.mjs && node scripts/test-page-isolation.mjs && node scripts/test-ai-scene.mjs && node scripts/test-design-scene-v2.mjs && node scripts/test-render-replies.mjs && node scripts/test-design-screen-batches.mjs && node scripts/test-ai-stream.mjs"
   }
 }
