@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import worker from "../dist/server/index.js";
+import worker from "../dist/worker.js";
 
 globalThis.fetch=async (url,options={})=>{
   assert.equal(new URL(url).pathname,"/v1/chat/completions");
