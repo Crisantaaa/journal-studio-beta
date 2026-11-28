@@ -5,9 +5,9 @@ import vm from "node:vm";
 const worker=readFileSync(new URL("../worker/index.js",import.meta.url),"utf8");
 const source=worker.match(/const verifiedAiAccounts=new Map\(\);[\s\S]*?\r?\nfunction json\(/)?.[0].replace(/\r?\nfunction json\($/,"");
 assert.ok(source,"shared AI account validation missing");
-let status=207,checks=0;
-const context=vm.createContext({DAV:"https://dav.example.test/",TextEncoder,btoa,
-  dav:async()=>{checks++;return {status,ok:status>=200&&status<300};},
+let status=200,checks=0;
+const context=vm.createContext({FILE:"https://dav.example.test/JournalStudio/journal.json",TextEncoder,btoa,
+  dav:async(url,method)=>{assert.equal(url,"https://dav.example.test/JournalStudio/journal.json");assert.equal(method,"GET");checks++;return {status,ok:status>=200&&status<300};},
   hash:async bytes=>Array.from(bytes).join("-"),
   json:(data,code)=>new Response(JSON.stringify(data),{status:code,headers:{"Content-Type":"application/json"}})
 });
@@ -18,6 +18,9 @@ assert.equal(first.key,"shared-test-key");
 const again=await context.aiAccess({user:"one@example.test",pass:"app-password"},env);
 assert.equal(again.key,"shared-test-key");
 assert.equal(checks,1,"same design turn should not reverify WebDAV for every model call");
+status=404;
+const empty=await context.aiAccess({user:"new@example.test",pass:"app-password"},env);
+assert.equal(empty.key,"shared-test-key","a valid account without a journal file may still use AI");
 status=429;
 const limited=await context.aiAccess({user:"two@example.test",pass:"app-password"},env);
 assert.equal(limited.error.status,503);

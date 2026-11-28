@@ -23,9 +23,13 @@ async function aiAccess(input,env){
   const accountKey=await hash(new TextEncoder().encode(String(input.user).trim().toLowerCase()+"\0"+String(input.pass)));
   const now=Date.now();
   if((verifiedAiAccounts.get(accountKey)||0)<=now){
-    let check;try{check=await dav(DAV,"PROPFIND",auth,null,{Depth:"0"});}catch{return {error:json({error:"坚果云验证服务暂时无法连接，请稍后重试"},503)};}
+    // Validate against the journal file used by ordinary reads/saves. A separate
+    // PROPFIND on the DAV root can fail even while journal access works.
+    let check;try{check=await dav(FILE,"GET",auth);}catch{return {error:json({error:"坚果云验证服务暂时无法连接，请稍后重试"},503)};}
+    // Authentication only needs the response status, not the journal contents.
+    if(check.body)void check.body.cancel().catch(()=>{});
     if(check.status===401||check.status===403)return {error:json({error:"坚果云账号或应用密码已失效，请重新连接"},401)};
-    if(!check.ok&&check.status!==207)return {error:json({error:`坚果云验证服务暂时不可用（HTTP ${check.status}），请稍后重试`},503)};
+    if(!check.ok&&check.status!==404)return {error:json({error:`坚果云验证服务暂时不可用（HTTP ${check.status}），请稍后重试`},503)};
     if(verifiedAiAccounts.size>=200)for(const [key,expires] of verifiedAiAccounts)if(expires<=now)verifiedAiAccounts.delete(key);
     if(verifiedAiAccounts.size>=200)verifiedAiAccounts.delete(verifiedAiAccounts.keys().next().value);
     verifiedAiAccounts.set(accountKey,now+45_000);
