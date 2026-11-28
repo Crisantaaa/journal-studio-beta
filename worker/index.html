@@ -2597,21 +2597,23 @@ function latestChatDesignSpec(conversation){
 const DESIGN_INSTRUCTION_WORDS={
   background:["背景","画布","底色","底纹","底图","纸张颜色","页面颜色","整体色调","全页","整页"],
   botanical:["植物","绿植","枝叶","叶片","叶子","花卉","花草","枝条","藤蔓","植被"],
-  styles:["梦核","梦幻","复古","清爽","极简","水彩","线稿","线描","手绘","拼贴","新中式","奶油风","胶片感","蜡笔","铅笔","版画","写实","扁平插画"]
+  styles:["梦核","梦幻","复古","清爽","极简","水彩","线稿","线描","手绘","拼贴","新中式","奶油风","胶片感","蜡笔","铅笔","版画","写实","扁平插画","简约线条","素描","扁平风","工笔","剪纸","水墨"]
 };
 function designHasWord(text,area){return (DESIGN_INSTRUCTION_WORDS[area]||[]).some(word=>String(text||"").includes(word));}
 function backgroundToneAdjustment(text){
   const value=String(text||"");
-  if(!designHasWord(value,"background"))return null;
-  if(/(?:降低|减少|减弱).{0,6}饱和|低饱和|柔和一些|柔和一点|更柔和|不那么鲜艳/.test(value))return "softer";
-  if(/浅一些|浅一点|更浅|淡一些|淡一点|更淡|亮一些|亮一点|更亮|提亮|调浅|调淡/.test(value))return "lighter";
-  if(/深一些|深一点|更深|暗一些|暗一点|更暗|浓一些|浓一点|加深|压暗|调深/.test(value))return "darker";
+  const clauses=value.split(/[，,。；;\n]/).map(clause=>clause.trim()).filter(clause=>designHasWord(clause,"background")&&!/(?:背景|画布|底色|底纹|底图|纸面).{0,10}(?:保持|不变|不动|照旧|保留|别改|不要改)|(?:保持|保留|别改|不要改|不动|照旧).{0,10}(?:背景|画布|底色|底纹|底图|纸面)/.test(clause)&&!materialBackgroundRemovalRequested(clause));
+  for(const clause of clauses){
+    if(/(?:降低|减少|减弱).{0,6}饱和|低饱和|柔和一些|柔和一点|更柔和|不那么鲜艳/.test(clause))return "softer";
+    if(/浅一些|浅一点|更浅|淡一些|淡一点|更淡|亮一些|亮一点|更亮|提亮|调浅|调淡/.test(clause))return "lighter";
+    if(/深一些|深一点|更深|暗一些|暗一点|更暗|浓一些|浓一点|加深|压暗|调深/.test(clause))return "darker";
+  }
   return null;
 }
 function parseDesignInstruction(request,priorSpec=null){
   const text=String(request||""),previous=priorSpec?.designState||(priorSpec?{background:{current:structuredClone(priorSpec.background||{})},materials:{botanicalStyle:structuredClone(priorSpec.materialPlan||null)},layout:{decorationCount:structuredClone(priorSpec.decorationPlan||null)},subjects:{existing:(priorSpec.groups||[]).map(group=>group.subject)},style:{direction:priorSpec.visualDirection||""},constraints:{}}:null),changes=[];
   const record=(area,field,value,source="user")=>changes.push({area,field,value,source});
-  const backgroundClause=text.split(/[，,。；;\n]/).find(clause=>designHasWord(clause,"background")&&!/(?:背景|底色).{0,8}(?:保持|不变)|(?:保持|保留).{0,8}(?:背景|底色)/.test(clause)&&!materialBackgroundRemovalRequested(clause))||"";
+  const backgroundClause=text.split(/[，,。；;\n]/).find(clause=>designHasWord(clause,"background")&&!/(?:背景|底色|画布).{0,8}(?:保持|不变|不动|照旧)|(?:保持|保留|不动|照旧).{0,8}(?:背景|底色|画布)/.test(clause)&&!materialBackgroundRemovalRequested(clause))||"";
   if(backgroundClause&&(!priorSpec||canvasBackgroundEditRequested(text))){
     const relative=backgroundToneAdjustment(backgroundClause);
     if(relative&&priorSpec)record("background","adjustment",relative);
@@ -2628,7 +2630,7 @@ function parseDesignInstruction(request,priorSpec=null){
   const namedLine=text.match(/画面主体或装饰[：:]([^\n]+)/)?.[1]||"";
   const named=namedLine.split(/[，,、；;]+/).map(value=>value.trim()).filter(Boolean);
   const subjectWords=["独角兽","植物","绿植","枝叶","花卉","咖啡杯","灯泡","高脚杯","猫","狗","人物"];
-  const forbiddenSubjects=subjectWords.filter(name=>text.split(/[，,。；;\n]/).some(clause=>!materialBackgroundRemovalRequested(clause)&&!/不要改|别改|保持|保留/.test(clause)&&new RegExp(`(?:不要|不画|禁止|去掉|移除).{0,5}${name}`).test(clause)));
+  const forbiddenSubjects=subjectWords.filter(name=>text.split(/[，,。；;\n]/).some(clause=>!materialBackgroundRemovalRequested(clause)&&!materialFrameRemovalRequested(clause)&&!/不要改|别改|保持|保留/.test(clause)&&new RegExp(`(?:不要|不画|禁止|去掉|移除).{0,5}${name}`).test(clause)));
   const explicitSubjects=(named.length?named:subjectWords.filter(name=>text.includes(name))).filter(name=>!forbiddenSubjects.some(forbidden=>name.includes(forbidden)));
   if(!priorSpec&&explicitSubjects.length)record("subjects","explicit",explicitSubjects);
   const styles=DESIGN_INSTRUCTION_WORDS.styles.filter(word=>text.includes(word));if(styles.length)record("style","direction",styles.join("、"));
@@ -2636,7 +2638,7 @@ function parseDesignInstruction(request,priorSpec=null){
   const state=structuredClone(previous||{background:{},materials:{},layout:{},subjects:{},style:{},constraints:{},provenance:{}});
   state.provenance??={};
   for(const change of changes){state[change.area]??={};state[change.area][change.field]=structuredClone(change.value);state.provenance[`${change.area}.${change.field}`]={source:change.source,request:text.slice(0,180)};}
-  state.constraints={...state.constraints,preserveUnmentioned:!!priorSpec,removeMaterialBackground:!!(state.materials?.removeBackground),forbiddenSubjects:[...new Set([...(state.constraints?.forbiddenSubjects||[]),...forbiddenSubjects])],forbidFrame:/不要.{0,8}(?:边框|相框)|无.{0,4}(?:边框|相框)/.test(text)||!!state.constraints?.forbidFrame};
+  state.constraints={...state.constraints,preserveUnmentioned:!!priorSpec,removeMaterialBackground:!!(state.materials?.removeBackground),forbiddenSubjects:[...new Set([...(state.constraints?.forbiddenSubjects||[]),...forbiddenSubjects])],forbidFrame:materialFrameRemovalRequested(text)||/不要.{0,8}(?:边框|相框|画框)|无.{0,4}(?:边框|相框|画框)/.test(text)||!!state.constraints?.forbidFrame};
   return {state,changes,preserved,raw:text.slice(0,500)};
 }
 function enforceDesignInstruction(decision,instruction){
@@ -2664,14 +2666,18 @@ function validateDesignInstruction(spec,instruction,prior=null){
 }
 function materialBackgroundRemovalRequested(text){
   const request=String(text||"");
-  return /(?:素材|图片|插画|植物|绿植|枝叶|花卉).{0,14}(?:去掉|去除|删除|不要|抠掉).{0,8}(?:背景|底色|白底|底板)|(?:去掉|去除|删除|不要|抠掉).{0,8}(?:素材|图片|插画|植物|绿植|枝叶|花卉).{0,14}(?:背景|底色|白底|底板)/.test(request);
+  return /(?:素材|图片|插画|植物|绿植|枝叶|花卉).{0,14}(?:去掉|去除|删除|不要|抠掉|移除).{0,8}(?:背景|底色|白底|底板)|(?:去掉|去除|删除|不要|抠掉|移除).{0,8}(?:素材|图片|插画|植物|绿植|枝叶|花卉).{0,14}(?:背景|底色|白底|底板)|(?:素材|图片|插画|植物|绿植|枝叶|花卉).{0,12}(?:白底|底板|底色|背景).{0,8}(?:去掉|去除|删除|抠掉|移除)|(?:素材|图片|插画|植物|绿植|枝叶|花卉).{0,12}(?:透明底|透明背景|抠图|无白底|不要白底)|(?:抠图|透明底|透明背景).{0,12}(?:素材|图片|插画|植物|绿植|枝叶|花卉)/.test(request);
+}
+function materialFrameRemovalRequested(text){
+  const request=String(text||"");
+  return /(?:去掉|去除|移除|删除|不要|取消).{0,14}(?:植物|绿植|枝叶|花卉|素材|图片|插画).{0,10}(?:画框|相框|边框|外框|框线)|(?:植物|绿植|枝叶|花卉|素材|图片|插画).{0,12}(?:画框|相框|边框|外框|框线).{0,8}(?:去掉|去除|移除|删除|取消)|(?:植物|绿植|枝叶|花卉|素材|图片|插画).{0,8}(?:不要|不带|无)(?:画框|相框|边框|外框|框线)/.test(request);
 }
 function canvasBackgroundEditRequested(text){
   const request=String(text||"").split("请保留明确指定的主体、颜色和范围；修改当前方案时")[0].replace(/^【快速补充要求｜修改当前背景】\s*/,"").replace(/^请修改当前页已有的背景设计。?\s*/,"");
   const clauses=request.split(/[，,。；;\n]/).map(value=>value.trim()).filter(Boolean);
   return clauses.some(clause=>{
     if(!/背景|画布|底色|底纹|整页|全页/.test(clause))return false;
-    if(/(?:背景|画布|底色|底纹).{0,12}(?:不变|保持|保留|不要改|别改)|(?:保持|保留|不要改|别改).{0,12}(?:背景|画布|底色|底纹)/.test(clause))return false;
+    if(/(?:背景|画布|底色|底纹).{0,12}(?:不变|不动|照旧|保持|保留|不要改|别改)|(?:保持|保留|不要改|别改|不动|照旧).{0,12}(?:背景|画布|底色|底纹)/.test(clause))return false;
     if(materialBackgroundRemovalRequested(clause)&&!/画布|整页|全页|页面背景/.test(clause))return false;
     if(backgroundToneAdjustment(clause))return true;
     return /(?:背景|画布|底色|底纹|整页|全页).{0,20}(?:修改|更改|改成|换成|改为|换为|调整|设置|设为|变成|去掉|删除|取消|增加|添加)|(?:修改|更改|改成|换成|改为|换为|调整|设置|设为|变成|去掉|删除|取消|增加|添加).{0,20}(?:背景|画布|底色|底纹|整页|全页)|(?:整页|全页|画布|背景|底色).{0,14}(?:红金|金红|红色|金色|绿色|蓝色|粉色|白色|黑色|#[0-9a-fA-F]{6}|渐变|格纹|格子|点阵|网格|波浪|晕染|纸纹)/.test(clause);
@@ -2716,14 +2722,16 @@ function subjectAdditionRequested(request,subject){
   const aliases=/植物|绿植|枝叶|花卉|藤蔓/.test(subject)?/植物|绿植|枝叶|花卉|藤蔓/:new RegExp(String(subject||"").replace(/[.*+?^${}()|[\]\\]/g,"\\$&"));
   return String(request||"").split(/[，,。；;\n]/).some(clause=>/增加|添加|再加|再来|多一些|更多/.test(clause)&&aliases.test(clause));
 }
-function botanicalDiversityRequested(request){return designHasWord(request,"botanical")&&(/(?:形状|形态|造型|素材|叶形).{0,8}(?:多样|变化|丰富|不同)|(?:多样|变化|丰富|不同).{0,8}(?:形状|形态|造型|素材|叶形)/.test(request)||/不要重复|别都一样|不要都一样|换几种叶形/.test(request));}
+function botanicalDiversityRequested(request){return designHasWord(request,"botanical")&&(/(?:形状|形态|造型|素材|叶形).{0,8}(?:多样|变化|丰富|不同)|(?:多样|变化|丰富|不同).{0,8}(?:形状|形态|造型|素材|叶形)/.test(request)||/不要重复|别都一样|不要都一样|换几种叶形|每处.{0,8}不同/.test(request));}
 function decorationCountPlan(request){
-  const text=String(request||"").replace(/[－—–~～至到]/g,"-");
+  const text=String(request||"").replace(/[－—–~～]/g,"-").replace(/([1-6一二两三四五六])[至到](?=[1-6一二两三四五六])/g,"$1-");
+  const chinese={一:1,二:2,两:2,三:3,四:4,五:5,六:6};
+  const bound=text.match(/(?:至少|不少于|起码|不低于|最多|不超过|至多)\s*([1-6一二两三四五六])\s*(?:处|组)|([1-6一二两三四五六])\s*(?:处|组)\s*(?:以上|以内|以下)/);
+  if(bound){const count=Number(bound[1]||bound[2])||chinese[bound[1]||bound[2]],upper=/最多|不超过|至多|以内|以下/.test(bound[0]);return upper?{min:1,max:count,target:count,explicit:true}:{min:count,max:6,target:count,explicit:true};}
   const numeric=text.match(/(?:装饰组数[：:]?[^\n]{0,12})?([1-6])\s*-\s*([1-6])\s*(?:处|组)/);
   if(numeric){const min=Math.min(Number(numeric[1]),Number(numeric[2])),max=Math.max(Number(numeric[1]),Number(numeric[2]));return {min,max,target:Math.min(6,Math.round((min+max)/2)),explicit:true};}
   const single=text.match(/(?:装饰组数[：:]?[^\n]{0,8})?([1-6])\s*(?:处|组)/);
   if(single){const count=Number(single[1]);return {min:count,max:count,target:count,explicit:true};}
-  const chinese={一:1,二:2,两:2,三:3,四:4,五:5,六:6};
   const spoken=text.match(/([一二两三四五六])\s*(?:到|至|\-|—|–)\s*([一二两三四五六])\s*(?:处|组)/);
   if(spoken){const min=chinese[spoken[1]],max=chinese[spoken[2]];return {min,max,target:Math.round((min+max)/2),explicit:true};}
   const one=text.match(/([一二两三四五六])\s*(?:处|组)/);
@@ -2757,7 +2765,7 @@ async function createDistributedBotanicalLayers(priorGroup,request,height,key,wa
   const variants=["single airy leafy sprig with a few narrow leaves","single trailing vine with spaced leaves","single small botanical branch with rounded leaves","single fern frond with delicate linework","single flowering twig with tiny buds","single minimal leaf cluster on one stem"];
   const layers=[],groups=[];
   for(let index=0;index<count;index++){
-    const group={...priorGroup,id:`${priorGroup.id}-part${index+1}`,subject:priorGroup.subject,style:`${priorGroup.style||""}; ${request}; ${variants[index%variants.length]}; one small isolated botanical motif, no pot, no frame, no white card, no background`,prompt:variants[index%variants.length],details:"单枝独立植物装饰；不画背景、容器、卡片或其他枝组"};
+    const group={...priorGroup,id:`${priorGroup.id}-part${index+1}`,variantIndex:index,subject:priorGroup.subject,style:`${priorGroup.style||""}; ${request}; ${variants[index%variants.length]}; one small isolated botanical motif, no pot, no frame, no white card, no background`,prompt:variants[index%variants.length],details:"单枝独立植物装饰；不画背景、容器、卡片或其他枝组"};
     const generated=await generateKolorsScene({groups:[group],background:{kind:"full_page_color",colors:[]},palette:["#507a5b","#97aa81","#eee5d6"],materialPlan:materialPlanForRequest(request,materialPlan),visualDirection:group.style,writingZone:"左侧书写"},height,key,waiting);
     const pieces=generated.layers.filter(item=>item.type==="image"||item.type==="shape"&&item.shape==="path");if(!pieces.length)throw new Error("独立植物素材未返回");
     const box=distributedBotanicalPlacement(index,height,layoutSeed);
@@ -2795,7 +2803,7 @@ async function reviseChatDesign(c,prior,request,height,key,waiting){
     catch(error){warnings.push(`分散植物素材失败，保留原图：${error.message}`);}
   }
   let edits=await revisionActions(c,request,prior);
-  if(botanical&&botanicalDiversityRequested(request))edits=[{action:"restyle",groupId:botanical.id,subject:botanical.subject,instruction:request,position:"keep"}];
+  if(botanical&&(botanicalDiversityRequested(request)||materialFrameRemovalRequested(request)))edits=[{action:"restyle",groupId:botanical.id,subject:botanical.subject,instruction:request,position:"keep"}];
   if(!edits.length&&/植物|绿植|枝叶/.test(request)&&(/改|调整|更|线条|线稿|简笔画/.test(request)||materialBackgroundRemovalRequested(request)))edits=[{action:"restyle",groupId:groups.find(group=>/植物|绿植|枝叶/.test(group.subject))?.id||"",subject:"植物",instruction:request,position:"keep"}];
   for(const item of edits){
     if(!item||!["restyle","move","add","remove"].includes(item.action))continue;
@@ -2828,7 +2836,7 @@ async function reviseChatDesign(c,prior,request,height,key,waiting){
       else if(/左上|右上|左下|右下/.test(request)&&selected.length>1){const corner=request.match(/左上|右上|左下|右下/)?.[0],right=corner.includes("右"),bottom=corner.includes("下");selected=selected.map(group=>{const layer=spec.layers.find(value=>value.groupId===group.id);return {group,score:layer?(right?PAGE_W-layer.x-layer.w/2:layer.x+layer.w/2)+(bottom?height-layer.y-layer.h/2:layer.y+layer.h/2):Infinity};}).sort((a,b)=>a.score-b.score).slice(0,1).map(item=>item.group);}
       for(const part of selected){
         const old=spec.layers.filter(layer=>layer.groupId===part.id);if(!old.length)continue;
-        if(item.action==="remove"&&/删除|移除|去掉|不要/.test(request)&&!materialBackgroundRemovalRequested(request)){spec.layers=spec.layers.filter(layer=>layer.groupId!==part.id);spec.groups=spec.groups.filter(group=>group.id!==part.id);continue;}
+        if(item.action==="remove"&&/删除|移除|去掉|不要/.test(request)&&!materialBackgroundRemovalRequested(request)&&!materialFrameRemovalRequested(request)){spec.layers=spec.layers.filter(layer=>layer.groupId!==part.id);spec.groups=spec.groups.filter(group=>group.id!==part.id);continue;}
         if(item.action==="move"){for(const layer of old){if(item.position?.includes("left"))layer.x=26;if(item.position?.includes("right"))layer.x=PAGE_W-layer.w-26;if(item.position?.includes("top"))layer.y=30;if(item.position?.includes("bottom"))layer.y=height-layer.h-30;}continue;}
         if(item.action!=="restyle")continue;
         const replacements=botanicalLineArtLayers(part,Math.max(0,(spec.groups||[]).indexOf(part)),height,spec.materialPlan).map((layer,i)=>({...layer,x:old[i]?.x??old[0].x,y:old[i]?.y??old[0].y,w:old[i]?.w??old[0].w,h:old[i]?.h??old[0].h}));
@@ -2838,7 +2846,7 @@ async function reviseChatDesign(c,prior,request,height,key,waiting){
     }
     if(index<0)continue;
     if(item.action==="remove"){
-      if(materialBackgroundRemovalRequested(request))continue;
+      if(materialBackgroundRemovalRequested(request)||materialFrameRemovalRequested(request))continue;
       if(!/删除|移除|去掉|不要/.test(request))continue;
       spec.layers=spec.layers.filter(layer=>layer.groupId!==target.id);spec.groups=groups.filter(group=>group.id!==target.id);continue;
     }
@@ -2889,7 +2897,8 @@ function controlledLayerRequest(text){
   if(/^【快速补充要求｜设计新背景】|^请为当前页设计背景/.test(request))return false;
   if(/另起一页|新建(?:一页|一个项目|新的背景)|开始(?:一个)?全新(?:设计|页面)|从零开始设计/.test(request))return false;
   if(backgroundToneAdjustment(request))return true;
-  if(materialBackgroundRemovalRequested(request)||wantsSeparateDecorations(request)&&/植物|绿植|枝叶|花卉|藤蔓/.test(request))return true;
+  if(request.split(/[，,。；;\n]/).some(clause=>/植物|绿植|枝叶|叶片|叶子|花卉|藤蔓|素材/.test(clause)&&!/背景|画布|底色|底纹/.test(clause)&&/(?:颜色|色彩|配色|线条|线稿|线描|勾线|轮廓|画风|风格|形状|造型).{0,12}(?:改|换|调|浅|淡|深|浓|柔和|简约|简单|清爽)|(?:改|换|调|浅|淡|深|浓|简约|简单|清爽).{0,12}(?:颜色|色彩|配色|线条|线稿|线描|勾线|轮廓|画风|风格|形状|造型)/.test(clause)))return true;
+  if(materialBackgroundRemovalRequested(request)||materialFrameRemovalRequested(request)||wantsSeparateDecorations(request)&&/植物|绿植|枝叶|花卉|藤蔓/.test(request))return true;
   if(/^【快速补充要求｜修改当前背景】|^请修改当前页已有的背景设计/.test(request))return true;
   const change=/(?:^|[。；;\n])\s*(?:请|帮我|我想)?\s*(?:把|将|给)?\s*(?:当前|这张|这个)?\s*(?:页|页面|画布|背景|底色|底纹|植物|绿植|枝叶|叶子|藤蔓)?\s*(?:修改|调整|改成|换成|增加|添加|多一些|减少)|(?:修改|调整|改成|换成|增加|添加|多一些|减少).{0,24}(?:背景|画布|底色|底纹|植物|绿植|枝叶|叶子|藤蔓)/.test(request);
   return change&&/(?:背景|画布|底色|底纹|植物|绿植|枝叶|叶子|藤蔓)/.test(request);
@@ -3085,12 +3094,16 @@ function explicitBackgroundPlan(request,pageId,parsedBackground={}){
 }
 function materialPlanForRequest(request,prior=null){
   const text=String(request||"");
-  const colors={绿色:["#3f7653","#779b72","#b9cbb2"],红色:["#a94743","#d47b70","#e8b4a4"],金色:["#a98342","#d2b36d","#eee0b8"],蓝色:["#416e91","#88a8bc","#c8d8dd"],粉色:["#b96e85","#dfa9b7","#f0d8dc"],白色:["#f3f0e8","#d9d7ca","#8d978a"],黑色:["#343b39","#646d67","#a6aca3"]};
+  const colors={绿色:["#3f7653","#779b72","#b9cbb2"],红色:["#a94743","#d47b70","#e8b4a4"],金色:["#a98342","#d2b36d","#eee0b8"],蓝色:["#416e91","#88a8bc","#c8d8dd"],粉色:["#b96e85","#dfa9b7","#f0d8dc"],白色:["#f3f0e8","#d9d7ca","#8d978a"],黑色:["#343b39","#646d67","#a6aca3"],黄色:["#b99641","#dfc681","#f1e5bc"],紫色:["#745b91","#a58ab8","#d8c9e2"],橙色:["#bd7048","#dba075","#efd2b4"],灰色:["#596a70","#91a0a2","#cbd2d0"]};
   const target="(?:植物|绿植|枝叶|叶片|花卉|花朵|素材|插画)";
   const subjectClauses=text.split(/[，,。；;\n]/).map(value=>value.trim()).filter(value=>/(?:植物|绿植|枝叶|叶片|花卉|花朵|素材|插画)/.test(value)&&!/背景|画布|底色|底纹/.test(value));
-  const named=Object.keys(colors).find(color=>subjectClauses.some(clause=>new RegExp(`${color}.{0,8}${target}|${target}.{0,8}${color}`).test(clause)));
-  const cleanLines=/清爽线条|简笔画|线稿|线描|单线|极简线条/.test(text);
-  return {palette:named?colors[named]:prior?.palette||colors.绿色,style:cleanLines?"clean_line_art":prior?.style||"botanical_illustration",colorName:named||prior?.colorName||"绿色",explicitColor:!!named||!!prior?.explicitColor,explicitStyle:cleanLines||!!prior?.explicitStyle};
+  const named=Object.keys(colors).find(color=>subjectClauses.some(clause=>new RegExp(`${color}.{0,8}${target}|${target}.{0,8}${color}`).test(clause)))||
+    (subjectClauses.length?Object.keys(colors).find(color=>new RegExp(`(?:颜色|色彩|配色)(?:要求|指定|设置)?(?:为|是|改为|改成|用|使用)?\\s*${color}`).test(text)&&!text.split(/[，,。；;\n]/).some(clause=>/(?:背景|画布|底色|底纹)/.test(clause)&&clause.includes(color))):null);
+  const cleanLines=/清爽线条|简笔画|线稿|线描|单线|极简线条|简约线条(?:风)?|线条风|细线条|勾线|轮廓线|线性插画/.test(text);
+  const materialTone=subjectClauses.some(clause=>/(?:颜色|色彩|配色).{0,8}(?:浅|淡|亮|柔和|提亮)|(?:浅|淡|亮|柔和|提亮).{0,8}(?:颜色|色彩|配色)/.test(clause))?"lighter":subjectClauses.some(clause=>/(?:颜色|色彩|配色).{0,8}(?:深|暗|浓|压暗)|(?:深|暗|浓|压暗).{0,8}(?:颜色|色彩|配色)/.test(clause))?"darker":null;
+  const palette=named?colors[named]:prior?.palette||colors.绿色;
+  const adjusted=materialTone?palette.map(color=>"#"+[1,3,5].map(i=>{const channel=parseInt(color.slice(i,i+2),16);return Math.round(materialTone==="lighter"?channel*.72+255*.28:channel*.78).toString(16).padStart(2,"0");}).join("")):palette;
+  return {palette:adjusted,style:cleanLines?"clean_line_art":prior?.style||"botanical_illustration",colorName:named||prior?.colorName||"绿色",explicitColor:!!named||!!prior?.explicitColor||!!materialTone,explicitStyle:cleanLines||!!prior?.explicitStyle};
 }
 function materialPlanForRevision(request,prior){
   const history=(prior?.requirements||[]).filter(item=>item.type==="user_request").map(item=>item.value);
@@ -3342,7 +3355,7 @@ function kolorsSubjectPrompt(group,decision){
   const style=String(decision.visualDirection||"精致手绘手帐插画").slice(0,55);
   const palette=botanical?(decision.materialPlan?.palette||["#3f7653","#779b72","#b9cbb2"]):[...(decision.requiredColors||[]),...(decision.palette||[])];
   const colors=palette.filter((color,index,all)=>/^#[0-9a-fA-F]{6}$/.test(color)||/红色|蓝色|绿色|黄色|黑色|白色|粉色|紫色|橙色/.test(color)).filter((color,index,all)=>all.indexOf(color)===index).slice(0,5).join(", ");
-  const lineStyle=decision.materialPlan?.style==="clean_line_art"?"Minimal clean botanical line art, thin crisp outlines, sparse open composition, very limited flat green accents, no watercolor wash, no dense fills, no ornate floral arrangement.":"Natural botanical illustration with clear leaf silhouettes.";
+  const lineStyle=decision.materialPlan?.style==="clean_line_art"?"Minimal clean botanical line art, thin crisp outlines, sparse open composition, very limited flat accents in the specified material colors, no green unless requested, no watercolor wash, no dense fills, no ornate floral arrangement.":"Natural botanical illustration with clear leaf silhouettes.";
   return (botanical?`One isolated botanical branch, ${subject}. ${lineStyle} Material colors only: ${colors}. Uniform white for removal. No square, no rectangular frame, no border lines, no card, no wreath, no container, no collage, no text. Only one free-standing branch, no straight geometric lines.`:`One ${subject}, centered, full object visible. Elegant hand-drawn journal illustration, ${style}, palette ${colors}. ${group.style||""}. Pure white empty background, no white card or rectangular panel. Clear outer contour and layered details. This image contains ONLY the named object, with no unrelated objects, scene, collage, frame, text or logo.`).slice(0,900);
 }
 function selectMaterialLibraryCandidate(group,decision){
@@ -3355,10 +3368,10 @@ function selectMaterialLibraryCandidate(group,decision){
 function botanicalLineArtLayers(group,index,height,materialPlan){
   const box=kolorsScenePlacement(group,index,height,"左侧书写"),seed=(index+1)*37+(Number(String(group.id||"").match(/\d+$/)?.[0])||0)*19;
   const dark=materialPlan?.palette?.[0]||"#3f7653",light=materialPlan?.palette?.[1]||"#779b72";
-  const variant=index%4,stems=["M50 97 C37 76 62 48 50 6","M50 96 Q53 48 50 8","M43 97 Q70 86 50 68 Q25 52 55 35 Q76 20 46 8","M49 96 Q44 52 53 10"],stem=stems[variant],leaves=[],veins=[];
-  const count=[8,13,7,6][variant];
+  const variant=index%6,stems=["M50 97 C37 76 62 48 50 6","M50 96 Q53 48 50 8","M43 97 Q70 86 50 68 Q25 52 55 35 Q76 20 46 8","M49 96 Q44 52 53 10","M35 96 Q62 72 44 48 Q30 29 62 9","M59 97 C28 68 69 41 42 7"],stem=stems[variant],leaves=[],veins=[];
+  const count=[8,13,7,6,5,10][variant];
   for(let i=0;i<count;i++){
-    const y=86-i*Math.round(77/(count-1)),x=variant===2?[54,60,45,35,55,65,46][i]:50+Math.round(Math.sin((i+seed)*.8)*3),side=(i+seed+variant)%2?1:-1,spread=[18,28,13,16][variant]+(i*3+seed)%5,tipX=x+side*spread,tipY=y-[8,3,9,14][variant];
+    const y=86-i*Math.round(77/(count-1)),x=variant===2?[54,60,45,35,55,65,46][i]:50+Math.round(Math.sin((i+seed)*.8)*3),side=(i+seed+variant)%2?1:-1,spread=[18,28,13,16,21,11][variant]+(i*3+seed)%5,tipX=x+side*spread,tipY=y-[8,3,9,14,7,16][variant];
     if(variant===1){leaves.push(`M50 ${y} Q${50+side*14} ${y-5} ${50+side*spread} ${y-16} Q${50+side*13} ${y+3} 50 ${y}`);veins.push(`M50 ${y} L${50+side*spread} ${y-16}`);}
     else if(variant===3){leaves.push(`M${x} ${y} Q${x+side*7} ${y-25} ${tipX} ${tipY} Q${x+side*17} ${y+3} ${x} ${y}`);veins.push(`M${x} ${y} Q${x+side*8} ${y-8} ${tipX} ${tipY}`);}
     else{leaves.push(`M${x} ${y} Q${x+side*8} ${y-15} ${tipX} ${tipY} Q${x+side*15} ${y+2} ${x} ${y}`);veins.push(`M${x} ${y} Q${x+side*9} ${y-4} ${tipX} ${tipY}`);}
@@ -3402,7 +3415,7 @@ async function generateKolorsScene(decision,height,key,waiting){
   const palette=(decision.palette||[]).filter(color=>/^#[0-9a-fA-F]{6}$/.test(color));
   for(const [index,group] of groups.entries()){
     if(group.scope==="local_decoration"||(/格子|条纹|棋盘/.test(group.subject)&&decision.background?.kind!=="full_page_pattern")){layers.push(...editablePatternLayers(group,index,height,decision.writingZone,palette));continue;}
-    if(decision.materialPlan?.style==="clean_line_art"&&/植物|绿植|枝叶|花卉|藤蔓/.test(group.subject)){layers.push(...botanicalLineArtLayers(group,index,height,decision.materialPlan));continue;}
+    if(decision.materialPlan?.style==="clean_line_art"&&/植物|绿植|枝叶|花卉|藤蔓/.test(group.subject)){layers.push(...botanicalLineArtLayers(group,group.variantIndex??index,height,decision.materialPlan));continue;}
     waiting.textContent=`⏳ 正在生成主体 ${index+1}/${groups.length}：${group.subject}…`;
     const prompt=kolorsSubjectPrompt(group,decision);
     const candidate=selectMaterialLibraryCandidate(group,decision);let reference=null;
@@ -3746,9 +3759,14 @@ async function send(rawPrompt, fromWiz){
       const spec=controlledBackgroundSpec(t,target,pageHeight(target),prior);
       const activeCount=effectiveDecorationPlan(t,prior);
       if(activeCount)spec.decorationPlan=activeCount;
-      if((wantsSeparateDecorations(t)||activeCount?.min>1)&&/植物|绿植|枝叶|花卉|藤蔓/.test(t)){
+      const knownPlantIds=new Set((prior?.groups||[]).filter(group=>/植物|绿植|枝叶|花卉|藤蔓/.test(group.subject)).map(group=>group.id));
+      const existingPlantLayers=spec.layers.filter(layer=>/^(?:controlled-botanical|botanical-image)/.test(String(layer.groupId||""))||knownPlantIds.has(layer.groupId));
+      const existingPlantIds=[...new Set(existingPlantLayers.map(layer=>layer.groupId))];
+      if(materialFrameRemovalRequested(t)&&!existingPlantIds.length)throw new Error("当前草稿没有可修改的植物素材；已保留原预览，请先生成或选中素材后重试。");
+      const materialEdit=existingPlantIds.length>0&&/植物|绿植|枝叶|花卉|藤蔓|素材/.test(t)&&(/颜色|色彩|配色|线条|线稿|线描|勾线|轮廓|画风|风格|形状|造型/.test(t)||materialFrameRemovalRequested(t));
+      if((wantsSeparateDecorations(t)||activeCount?.min>1||materialEdit)&&/植物|绿植|枝叶|花卉|藤蔓/.test(t)){
         const group={id:"controlled-botanical",subject:"绿色植物枝叶",style:t};
-        try{const count=activeCount?.target||3;spec.layoutSeed=prior?.layoutSeed??newDecorationLayoutSeed();spec.materialPlan=materialPlanForRequest(t,prior?.materialPlan);const split=await createDistributedBotanicalLayers(group,t,pageHeight(target),c.key,waiting,count,spec.layoutSeed,spec.materialPlan);spec.layers=spec.layers.filter(layer=>layer.groupId!=="controlled-botanical-image"&&layer.groupId!=="controlled-botanical"&&!String(layer.groupId||"").startsWith("controlled-botanical-part"));spec.layers.push(...split.layers);spec.groups=split.groups;spec.decorationPlan=activeCount;spec.suggestion+=` 已将植物拆成 ${split.groups.length} 组独立素材，分布在页面不同位置。`;}
+        try{const count=activeCount?.target||existingPlantIds.length||3;spec.layoutSeed=prior?.layoutSeed??newDecorationLayoutSeed();spec.materialPlan=materialPlanForRequest(t,prior?.materialPlan);const split=await createDistributedBotanicalLayers(group,t,pageHeight(target),c.key,waiting,count,spec.layoutSeed,spec.materialPlan);if(materialEdit&&!decorationCountPlan(t))split.layers.forEach(layer=>{const partIndex=Math.max(0,Number(String(layer.groupId).match(/-part(\d+)$/)?.[1]||1)-1);const previous=existingPlantLayers.find(item=>item.groupId===existingPlantIds[Math.min(partIndex,existingPlantIds.length-1)]);if(previous)for(const field of ["x","y","w","h"])layer[field]=previous[field];});spec.layers=spec.layers.filter(layer=>!existingPlantIds.includes(layer.groupId)&&layer.groupId!=="controlled-botanical-image"&&layer.groupId!=="controlled-botanical"&&!String(layer.groupId||"").startsWith("controlled-botanical-part"));spec.layers.push(...split.layers);spec.groups=[...(prior?.groups||[]).filter(item=>!existingPlantIds.includes(item.id)),...split.groups];spec.decorationPlan=activeCount||prior?.decorationPlan;spec.suggestion+=` 已按本轮要求更新植物素材，保留未点名的背景与对象。`;}
         catch(error){spec.suggestion+=` 植物拆分失败，保留原素材：${String(error.message||error).slice(0,90)}。`;}
       }else{
         try{await addDesignedBotanicalAsset(spec,t,pageHeight(target),c.key,waiting);}
